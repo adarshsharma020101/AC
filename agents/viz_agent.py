@@ -566,6 +566,8 @@ class VizAgent:
         elif viz_type == "density_heatmap":
             fig = px.density_heatmap(data, x=x, y=y, title=title, color_continuous_scale=colors)
         
-        elif viz_type == "treemap":
-            fig = px.treemap(data, path=[x] if isinstance(x, str) else x, values=y, color=color, 
-                            title=title, color_discrete_sequence=colors
+        # elif viz_type == "treemap":
+        #     fig = px.treemap(data, path=[x] if isinstance(x, str) else x, values=y, color=color, 
+        #                     title=title, color_discrete_sequence=colors
+        else:
+            raise ValueError(f"Unsupported visualization type: {viz_type} for Plotly")
