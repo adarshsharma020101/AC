@@ -15,6 +15,7 @@ from app.components.data_upload import render_data_upload
 from app.components.visualization import render_visualization
 from app.components.voice_interface import render_voice_interface
 from app.components.collaborative import render_collaborative_tools
+from app.components.anomaly_detection import render_anomaly_detection
 
 # Import agents
 from agents.agent_manager import AgentManager
@@ -95,6 +96,8 @@ def main():
     # Main content area based on selected page
     if selected_page == "Upload":
         render_data_upload()
+    elif selected_page == "Anomaly Detection":  
+        render_anomaly_detection()
     elif selected_page == "Chat":
         render_chat_interface()
     elif selected_page == "Visualize":
@@ -107,6 +110,7 @@ def main():
         render_voice_interface()
     elif selected_page == "Settings":
         render_settings()
+    
     
     # Footer
     st.markdown("---")
@@ -259,6 +263,122 @@ def render_settings():
     # Save settings button
     if st.button("Save Settings"):
         st.success("Settings saved successfully!")
+
+def render_anomaly_detection():
+    """Render the anomaly detection interface"""
+    st.header("Anomaly Detection Center")
+    
+    session = get_session_state()
+    agent_manager = session['agent_manager']
+    anomaly_agent = agent_manager.get_agent("anomaly")
+    data_agent = agent_manager.get_agent("data")
+    
+    # Dataset selection
+    datasets = data_agent.list_datasets()
+    if not datasets:
+        st.warning("Please upload and process data first")
+        return
+        
+    selected_dataset = st.selectbox(
+        "Select Dataset",
+        [d['dataset_id'] for d in datasets],
+        help="Choose a processed dataset for anomaly detection"
+    )
+    
+    # Detection configuration
+    with st.expander("Advanced Settings"):
+        methods = st.multiselect(
+            "Detection Methods",
+            ["Autoencoder", "Isolation Forest", "Prophet", "Z-Score"],
+            default=["Autoencoder", "Isolation Forest"]
+        )
+        
+        consensus_mode = st.selectbox(
+            "Consensus Strategy",
+            ["Ensemble", "AOM", "MOA"],
+            index=0
+        )
+    
+    if st.button("Run Anomaly Scan"):
+        with st.spinner("Detecting anomalies..."):
+            try:
+                result = anomaly_agent.detect_anomalies(
+                    dataset_id=selected_dataset,
+                    methods=methods,
+                    mode=consensus_mode.lower()
+                )
+                
+                session['last_anomaly_result'] = result
+                st.success(f"Found {sum(result['report']['anomaly_flags']} anomalies")
+                
+            except Exception as e:
+                st.error(f"Detection failed: {str(e)}")
+    
+    # Display results if available
+    if 'last_anomaly_result' in session:
+        result = session['last_anomaly_result']
+        
+        # Show summary stats
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Anomalies", sum(result['report']['anomaly_flags']))
+        with col2:
+            st.metric("Max Severity", f"{max(result['report']['scores']):.2f}")
+        with col3:
+            st.metric("Detection Methods", ", ".join(result['metadata']['methods_used']))
+        
+        # Show visualizations
+        st.subheader("Detection Visualizations")
+        viz_agent = agent_manager.get_agent("viz")
+        
+        for viz_type, viz_data in result['visualizations'].items():
+            if viz_data:
+                with st.expander(f"{viz_type.replace('_', ' ').title()}"):
+                    if viz_data['file_path'].endswith('.html'):
+                        st.components.v1.html(open(viz_data['file_path']).read(), 
+                                           height=400)
+                    else:
+                        st.image(viz_data['preview'], 
+                               caption=viz_data['metadata']['parameters']['title'])
+        
+        # Anomaly explanation and feedback
+        st.subheader("Anomaly Investigation")
+        selected_anomaly = st.selectbox(
+            "Select Anomaly to Investigate",
+            [i for i, flag in enumerate(result['report']['anomaly_flags']) if flag]
+        )
+        
+        if selected_anomaly:
+            explanation = anomaly_agent.explain_anomalies(
+                dataset_id=selected_dataset,
+                version_id=result['version_id'],
+                anomaly_index=selected_anomaly
+            )
+            
+            st.write("### Feature Contributions")
+            for feature in explanation['local_explanations']:
+                st.progress(abs(feature['shap_impact']), 
+                          text=f"{feature['feature']}: {feature['value']}")
+            
+            # Feedback system
+            st.write("### Feedback")
+            col_fb1, col_fb2 = st.columns(2)
+            with col_fb1:
+                if st.button("👍 Confirm Anomaly"):
+                    anomaly_agent.process_feedback({
+                        'version_id': result['version_id'],
+                        'indexes': [selected_anomaly],
+                        'label': True
+                    })
+                    st.success("Feedback recorded!")
+            with col_fb2:
+                if st.button("👎 False Positive"):
+                    anomaly_agent.process_feedback({
+                        'version_id': result['version_id'],
+                        'indexes': [selected_anomaly],
+                        'label': False
+                    })
+                    st.success("Feedback recorded!")
 
 def collect_user_feedback():
     """Collect and store user feedback for model improvement"""
